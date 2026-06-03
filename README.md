@@ -22,6 +22,14 @@ The core of the system is an agentic planning-execution loop built on [LangGraph
 - **Reasoning Model (`llama-3.3-70b-versatile`)**: Drives complex orchestration including planning, medication reconciliation, deep safety verification, and final report synthesis.
 - **Utility Model (`llama-3.1-8b-instant`)**: Handles high-throughput information extraction inside the Reader Node.
 
+### Main Nodes in the Workflow
+
+* 🧠 **Planner Node ([planner_node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L58-L111))**: The central decision-maker. At each loop iteration, it evaluates the accumulated state (extracted details, safety warnings, medication reconciliation logs) and chooses the next action (`READ_DOCUMENTS`, `RECONCILE_MEDICATIONS`, `VERIFY_SAFETY`, or `SYNTHESIZE_DRAFT`). It also handles loop control and enforces a hard execution cap of 8 iterations to prevent infinite runs.
+* 📖 **Reader Node ([reader_node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L114-L197))**: The information gatherer. Dynamically filters and indexes raw layout pages based on the Planner's requested topics. It extracts precise facts (patient demographics, clinical notes, lab values) using the faster utility model without inventing missing details.
+* ⚖️ **Reconciler Node ([reconciler_node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L200-L249))**: The medication auditor. Compares admission medications with discharge medications and checks the hospital course notes to find clinical justifications for any additions, discontinuations, or dosage changes. Unjustified changes are flagged with high-severity warnings.
+* 🛡️ **Safety Verifier Node ([safety_verifier_node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L252-L350))**: The safety inspector. Executes direct checks for critical drug-drug interactions (e.g. Aspirin + Warfarin), scans for conflicting statements across different notes, enforces missing demographics detection (preventing fabrication), and triggers clinical warnings for contraindicated medication usage.
+* ✍️ **Synthesizer Node ([synthesizer_node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L353-L396))**: The report compiler. Orchestrates the final clinical draft creation. It assembles all warning flags, demographics, course narrative, reconciliation lists, and pending lab instructions into a professional clinician Markdown report alongside a structured JSON draft.
+
 ### Workflow Diagram
 
 ```mermaid
