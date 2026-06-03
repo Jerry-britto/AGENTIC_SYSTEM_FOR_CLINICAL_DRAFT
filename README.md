@@ -24,11 +24,11 @@ The core of the system is an agentic planning-execution loop built on [LangGraph
 
 ### Main Nodes in the Workflow
 
-* 🧠 **Planner Node ([planner_node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L58-L111))**: The central decision-maker. At each loop iteration, it evaluates the accumulated state (extracted details, safety warnings, medication reconciliation logs) and chooses the next action (`READ_DOCUMENTS`, `RECONCILE_MEDICATIONS`, `VERIFY_SAFETY`, or `SYNTHESIZE_DRAFT`). It also handles loop control and enforces a hard execution cap of 8 iterations to prevent infinite runs.
-* 📖 **Reader Node ([reader_node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L114-L197))**: The information gatherer. Dynamically filters and indexes raw layout pages based on the Planner's requested topics. It extracts precise facts (patient demographics, clinical notes, lab values) using the faster utility model without inventing missing details.
-* ⚖️ **Reconciler Node ([reconciler_node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L200-L249))**: The medication auditor. Compares admission medications with discharge medications and checks the hospital course notes to find clinical justifications for any additions, discontinuations, or dosage changes. Unjustified changes are flagged with high-severity warnings.
-* 🛡️ **Safety Verifier Node ([safety_verifier_node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L252-L350))**: The safety inspector. Executes direct checks for critical drug-drug interactions (e.g. Aspirin + Warfarin), scans for conflicting statements across different notes, enforces missing demographics detection (preventing fabrication), and triggers clinical warnings for contraindicated medication usage.
-* ✍️ **Synthesizer Node ([synthesizer_node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L353-L396))**: The report compiler. Orchestrates the final clinical draft creation. It assembles all warning flags, demographics, course narrative, reconciliation lists, and pending lab instructions into a professional clinician Markdown report alongside a structured JSON draft.
+* 🧠 **Planner Node**: The central decision-maker. At each loop iteration, it evaluates the accumulated state (extracted details, safety warnings, medication reconciliation logs) and chooses the next action (`READ_DOCUMENTS`, `RECONCILE_MEDICATIONS`, `VERIFY_SAFETY`, or `SYNTHESIZE_DRAFT`). It also handles loop control and enforces a hard execution cap of 8 iterations to prevent infinite runs.
+* 📖 **Reader Node**: The information gatherer. Dynamically filters and indexes raw layout pages based on the Planner's requested topics. It extracts precise facts (patient demographics, clinical notes, lab values) using the faster utility model without inventing missing details.
+* ⚖️ **Reconciler Node**: The medication auditor. Compares admission medications with discharge medications and checks the hospital course notes to find clinical justifications for any additions, discontinuations, or dosage changes. Unjustified changes are flagged with high-severity warnings.
+* 🛡️ **Safety Verifier Node**: The safety inspector. Executes direct checks for critical drug-drug interactions (e.g. Aspirin + Warfarin), scans for conflicting statements across different notes, enforces missing demographics detection (preventing fabrication), and triggers clinical warnings for contraindicated medication usage.
+* ✍️ **Synthesizer Node**: The report compiler. Orchestrates the final clinical draft creation. It assembles all warning flags, demographics, course narrative, reconciliation lists, and pending lab instructions into a professional clinician Markdown report alongside a structured JSON draft.
 
 ### Workflow Diagram
 
@@ -103,38 +103,46 @@ flowchart TD
 Clickable links to the project components:
 
 * 📂 **Root Files**
-  * 📄 [main.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/main.py): Application entrypoint. Coordinates document parsing, initial state configuration, LangGraph loop execution, and output file persistence.
-  * 📄 [pyproject.toml](file:///home/jerrybritto/demo/AI/clinical_draft_agent/pyproject.toml): Project metadata and library dependencies configuration.
+  * 📄 **app.py**: Streamlit web application providing a medical-themed graphical user interface, patient record selection/upload, real-time agent decisional trace logs, and draft downloads.
+  * 📄 **main.py**: Application entrypoint. Coordinates document parsing, initial state configuration, LangGraph loop execution, and output file persistence.
+  * 📄 **pyproject.toml**: Project metadata and library dependencies configuration.
 * 📂 **`clinical_agent` Module**
-  * 📄 [__init__.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/__init__.py): Module initialization and class exports.
-  * 📄 [config.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/config.py): API key validator and model assignments (Groq's `llama-3.3-70b-versatile` for reasoning tasks and `llama-3.1-8b-instant` for utility/reading tasks).
-  * 📄 [graph.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/graph.py): Compiles the `StateGraph` using [AgentState](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/state.py) and configures the conditional routing.
-  * 📄 [nodes.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py): Core node functions executing LLM tasks and updating the agent state.
-  * 📄 [state.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/state.py): Standardizes the `AgentState` type dictionary.
-  * 📄 [tools.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/tools.py): Local drug-drug interaction matching logic and critical interaction reference database.
-  * 📄 [prompts.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/prompts.py): System and user instructions for the Planner, Reader, Reconciler, Safety Verifier, and Synthesizer roles.
-  * 📄 [parser.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/parser.py): Integrates `LlamaCloud` visual parsing API with local caching.
+  * 📄 **config.py**: API key validator and model assignments (Groq's `llama-3.3-70b-versatile` for reasoning tasks and `llama-3.1-8b-instant` for utility/reading tasks).
+  * 📄 **graph.py**: Compiles the `StateGraph` using [AgentState](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/state.py) and configures the conditional routing.
+  * 📄 **nodes.py**: Core node functions executing LLM tasks and updating the agent state.
+  * 📄 **state.py**: Standardizes the `AgentState` type dictionary.
+  * 📄 **tools.py**: Local drug-drug interaction matching logic and critical interaction reference database.
+  * 📄 **prompts.py**: System and user instructions for the Planner, Reader, Reconciler, Safety Verifier, and Synthesizer roles.
+  * 📄 **parser.py**: Integrates `LlamaCloud` visual parsing API with local caching.
 * 📂 **Tests**
-  * 📄 [test_clinical_agent.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/tests/test_clinical_agent.py): Comprehensive unit tests covering DDI lookups, JSON parsing, router endpoints, and parser caching.
+  * 📄 **test_clinical_agent.py**: Comprehensive unit tests covering DDI lookups, JSON parsing, router endpoints, and parser caching.
 
 ---
 
 ## ⚙️ Installation & Setup
 
-1. **Activate the Virtual Environment**
+1. **Clone the Repository**
+   Clone the repository from GitHub and navigate to the project directory:
+   ```bash
+   git clone https://github.com/Jerry-britto/AGENTIC_SYSTEM_FOR_CLINICAL_DRAFT
+   cd AGENTIC_SYSTEM_FOR_CLINICAL_DRAFT
+   ```
+
+2. **Activate the Virtual Environment**
    Activate your existing virtual environment:
    ```bash
+   python3 -m venv .venv
    source .venv/bin/activate
    ```
    *(Or let the `uv` package manager handle the context execution automatically.)*
 
-2. **Install Dependencies**
+3. **Install Dependencies**
    Install all dependencies declared in [pyproject.toml](file:///home/jerrybritto/demo/AI/clinical_draft_agent/pyproject.toml) using the `uv` package manager:
    ```bash
    uv sync
    ```
 
-3. **Configure Environment Variables**
+4. **Configure Environment Variables**
    Create a `.env` file in the root directory (based on the template below) and supply your API keys:
    ```env
    GROQ_API_KEY=your_groq_api_key_here
@@ -145,8 +153,14 @@ Clickable links to the project components:
 
 ## 🚀 How to Run
 
-To run the agentic workflow on the baseline document `data/patient_records.pdf`, run the command:
+### Option 1: Streamlit Graphical Interface (Recommended)
+You can launch the interactive, medical-themed Streamlit interface to upload files or select existing records, and view the agent's real-time decisional trace:
+```bash
+uv run streamlit run app.py
+```
 
+### Option 2: Command Line Interface (CLI)
+To run the automated clinical drafting agent synchronously on the baseline document `data/patient_records.pdf`, execute:
 ```bash
 uv run python main.py
 ```

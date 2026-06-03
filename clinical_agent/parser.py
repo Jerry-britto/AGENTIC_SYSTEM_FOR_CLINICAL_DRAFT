@@ -2,6 +2,7 @@ import os
 import json
 from llama_cloud import LlamaCloud
 from clinical_agent.config import LLAMA_CLOUD_API_KEY
+from clinical_agent.logging_utils import logger
 
 class LlamaCloudParser:
     def __init__(self, cache_dir: str = "cache"):
@@ -23,15 +24,15 @@ class LlamaCloudParser:
 
         # 1. Load from cache if it exists
         if os.path.exists(cache_path):
-            print(f"[Parser] Loading parsed documents from cache: {cache_path}")
+            logger.info(f"[Parser] Loading parsed documents from cache: {cache_path}")
             try:
                 with open(cache_path, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
-                print(f"[Parser] Failed to read cache: {e}. Re-parsing...")
+                logger.warning(f"[Parser] Failed to read cache: {e}. Re-parsing...")
 
         # 2. Parse via Llama Cloud
-        print(f"[Parser] Cache missing. Uploading and parsing: {pdf_path}...")
+        logger.info(f"[Parser] Cache missing. Uploading and parsing: {pdf_path}...")
         if not os.path.exists(pdf_path):
             raise FileNotFoundError(f"PDF document not found at {pdf_path}")
 
@@ -60,9 +61,9 @@ class LlamaCloudParser:
             with open(cache_path, "w", encoding="utf-8") as f_out:
                 json.dump(output_data, f_out, indent=2)
 
-            print(f"[Parser] Caching completed successfully at {cache_path}")
+            logger.info(f"[Parser] Caching completed successfully at {cache_path}")
             return output_data
 
         except Exception as e:
-            print(f"[Parser] Llama Cloud parsing failed: {e}")
+            logger.error(f"[Parser] Llama Cloud parsing failed: {e}")
             raise e

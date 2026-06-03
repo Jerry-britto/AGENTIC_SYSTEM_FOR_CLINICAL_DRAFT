@@ -3,12 +3,13 @@ import json
 from dotenv import load_dotenv
 from clinical_agent.parser import LlamaCloudParser
 from clinical_agent.graph import compile_clinical_agent_graph
+from clinical_agent.logging_utils import logger
 
 def main():
     load_dotenv()
-    print("=" * 60)
-    print("       CLINICAL DISCHARGE SUMMARY AGENTIC SYSTEM       ")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("       CLINICAL DISCHARGE SUMMARY AGENTIC SYSTEM       ")
+    logger.info("=" * 60)
 
     pdf_path = "data/patient_records.pdf"
     
@@ -17,14 +18,14 @@ def main():
     try:
         parsed_data = parser.parse_pdf(pdf_path)
     except Exception as e:
-        print(f"[FATAL ERROR] PDF parsing failed: {e}")
+        logger.error(f"[FATAL ERROR] PDF parsing failed: {e}")
         return
 
     pages = parsed_data.get("pages", [])
-    print(f"[Success] Loaded {len(pages)} parsed layouts/pages successfully.")
+    logger.info(f"[Success] Loaded {len(pages)} parsed layouts/pages successfully.")
 
     # 2. Compile LangGraph workflow
-    print("[Agent] Compiling LangGraph workflow...")
+    logger.info("[Agent] Compiling LangGraph workflow...")
     workflow = compile_clinical_agent_graph()
 
     # 3. Initialize Agent State
@@ -43,11 +44,11 @@ def main():
     }
 
     # 4. Execute LangGraph State Machine
-    print("[Agent] Initiating Agentic Loop...")
+    logger.info("[Agent] Initiating Agentic Loop...")
     try:
         final_state = workflow.invoke(initial_state)
     except Exception as e:
-        print(f"[FATAL ERROR] Agent loop crashed: {e}")
+        logger.error(f"[FATAL ERROR] Agent loop crashed: {e}")
         return
 
     # 5. Persist Output Files
@@ -65,13 +66,13 @@ def main():
     markdown_content = final_state.get("output_markdown", "")
     with open(markdown_path, "w", encoding="utf-8") as f_md:
         f_md.write(markdown_content)
-    print(f"\n[Success] Persisted Clinician Markdown Draft at: {markdown_path}")
+    logger.info(f"\n[Success] Persisted Clinician Markdown Draft at: {markdown_path}")
 
     # Save JSON Draft Data
     json_data = final_state.get("output_json", {})
     with open(json_path, "w", encoding="utf-8") as f_json:
         json.dump(json_data, f_json, indent=2)
-    print(f"[Success] Persisted Machine-Readable Structured JSON at: {json_path}")
+    logger.info(f"[Success] Persisted Machine-Readable Structured JSON at: {json_path}")
 
     # Save detailed Execution Trace
     trace_steps = final_state.get("trace_steps", [])
@@ -91,10 +92,10 @@ def main():
 
     with open(trace_path, "w", encoding="utf-8") as f_trace:
         f_trace.write(trace_markdown)
-    print(f"[Success] Persisted detailed Observability Trace at: {trace_path}")
-    print("=" * 60)
-    print("                    PROCESS COMPLETED                    ")
-    print("=" * 60)
+    logger.info(f"[Success] Persisted detailed Observability Trace at: {trace_path}")
+    logger.info("=" * 60)
+    logger.info("                    PROCESS COMPLETED                    ")
+    logger.info("=" * 60)
 
 if __name__ == "__main__":
     main()

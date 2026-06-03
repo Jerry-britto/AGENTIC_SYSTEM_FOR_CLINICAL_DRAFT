@@ -3,6 +3,7 @@ from groq import Groq
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from clinical_agent.config import GROQ_API_KEY, REASONING_MODEL, UTILITY_MODEL
 from clinical_agent.state import AgentState
+from clinical_agent.logging_utils import logger
 from clinical_agent.tools import check_drug_interactions
 from clinical_agent.prompts import (
     PLANNER_SYSTEM_PROMPT,
@@ -64,7 +65,7 @@ def planner_node(state: AgentState) -> AgentState:
     
     # Cap at 8 iterations
     if state["iteration_count"] > 8:
-        print("[Planner] Hard cap of 8 iterations reached. Forcing synthesis...")
+        logger.warning("[Planner] Hard cap of 8 iterations reached. Forcing synthesis...")
         state["current_plan"] = "Hard cap reached. Forcing SYNTHESIZE_DRAFT."
         trace_steps.append(f"Step {state['iteration_count']}: Planner forced SYNTHESIZE_DRAFT (cap of 8 reached).")
         state["trace_steps"] = trace_steps
@@ -90,8 +91,8 @@ Current Plan Checklist: {state['current_plan']}"""
         action = plan_data.get("action", "READ_DOCUMENTS")
         action_params = plan_data.get("action_parameters", {})
 
-        print(f"\n[Planner] Step {state['iteration_count']} reasoning: {reasoning}")
-        print(f"[Planner] Chosen Action: {action} with params: {action_params}")
+        logger.info(f"[Planner] Step {state['iteration_count']} reasoning: {reasoning}")
+        logger.info(f"[Planner] Chosen Action: {action} with params: {action_params}")
         
         state["current_plan"] = f"Action: {action} | Params: {action_params} | Reasoning: {reasoning}"
         trace_steps.append(f"Step {state['iteration_count']}: Planner reasoning: '{reasoning}' -> Chosen Action: {action}({action_params})")
@@ -102,7 +103,7 @@ Current Plan Checklist: {state['current_plan']}"""
         state["extracted_data"]["_next_action_params"] = action_params
 
     except Exception as e:
-        print(f"[Planner] Error during planning: {e}. Falling back to default extraction.")
+        logger.error(f"[Planner] Error during planning: {e}. Falling back to default extraction.")
         state["extracted_data"]["_next_action"] = "READ_DOCUMENTS"
         state["extracted_data"]["_next_action_params"] = {"search_topic": "all patient details"}
         trace_steps.append(f"Step {state['iteration_count']}: Planner failed: {e}. Fallback to READ_DOCUMENTS.")
@@ -134,12 +135,12 @@ def reader_node(state: AgentState) -> AgentState:
 
     doc_context = ""
     if use_specified_pages:
-        print(f"[Reader] Reading specified pages: {parsed_pages_list}")
+        logger.info(f"[Reader] Reading specified pages: {parsed_pages_list}")
         for page in state["parsed_pages"]:
             if page["page_number"] in parsed_pages_list:
                 doc_context += f"\n--- Page {page['page_number']} ---\n{page['markdown']}\n"
     else:
-        print(f"[Reader] Dynamically indexing records for topic: '{search_topic}'...")
+        logger.info(f"[Reader] Dynamically indexing records for topic: '{search_topic}'...")
         # Smart dynamic selector to avoid 12k Groq TPM limit
         keywords = ["diagnosis", "medication", "discharge", "admission", "procedure", "allergies", "history", "course", "lab", "creatinine", "glucose", "insulin"]
         for word in search_topic.lower().split():
@@ -165,18 +166,18 @@ def reader_node(state: AgentState) -> AgentState:
         
         # Cap selected pages to a maximum of 10 pages to respect TPM limit
         if len(selected_pages) > 10:
-            print(f"[Reader] Filtered {len(selected_pages)} matching pages down to top 10 to fit within API limits.")
+            logger.warning(f"[Reader] Filtered {len(selected_pages)} matching pages down to top 10 to fit within API limits.")
             # Select first 6 pages and last 4 pages (gives optimal temporal summary)
             selected_pages = selected_pages[:6] + selected_pages[-4:]
 
-        print(f"[Reader] Reading key pages: {[p['page_number'] for p in selected_pages]}")
+        logger.info(f"[Reader] Reading key pages: {[p['page_number'] for p in selected_pages]}")
         for page in selected_pages:
             doc_context += f"\n--- Page {page['page_number']} ---\n{page['markdown']}\n"
 
     # Enforce strict safety cap for Groq TPM (1 token ~ 4 characters, 8000 tokens ~ 32,000 chars)
     max_chars = 32000
     if len(doc_context) > max_chars:
-        print(f"[Reader] Context length ({len(doc_context)} chars) exceeds safety limits. Slicing to {max_chars} chars.")
+        logger.warning(f"[Reader] Context length ({len(doc_context)} chars) exceeds safety limits. Slicing to {max_chars} chars.")
         doc_context = doc_context[:max_chars] + "\n...[TRUNCATED FOR API CONSERVATISM]..."
 
     user_prompt = f"Topic to search/extract: {search_topic}\n\nPatient Documents:\n{doc_context}"
@@ -195,10 +196,10 @@ def reader_node(state: AgentState) -> AgentState:
             if v and v != "None" and v != "Unknown":
                 state["extracted_data"][k] = v
                 
-        print(f"[Reader] Successfully extracted details for topic: {search_topic}")
+        logger.info(f"[Reader] Successfully extracted details for topic: {search_topic}")
 
     except Exception as e:
-        print(f"[Reader] Error reading documents: {e}")
+        logger.error(f"[Reader] Error reading documents: {e}")
         state["safety_warnings"].append({
             "type": "SYSTEM_READ_ERROR",
             "message": f"Failed to read/extract documents for topic: {search_topic} due to: {e}"
@@ -211,7 +212,7 @@ def reconciler_node(state: AgentState) -> AgentState:
     """
     Medication Reconciler Node: Line-by-line comparison of admission vs discharge medications.
     """
-    print("[Reconciler] Running Medication Reconciliation...")
+    logger.info("[Reconciler] Running Medication Reconciliation...")
     
     # Identify lists of medications in extracted_data
     # We ask the LLM to pull them or standardise them
@@ -239,7 +240,7 @@ Hospital Course: {hospital_course}"""
         
         # Count discrepancies
         discrepancies = [r for r in results if r.get("severity") == "HIGH WARNING"]
-        print(f"[Reconciler] Reconciliation done. {len(results)} items checked. {len(discrepancies)} discrepancies found.")
+        logger.info(f"[Reconciler] Reconciliation done. {len(results)} items checked. {len(discrepancies)} discrepancies found.")
         
         for d in discrepancies:
             state["safety_warnings"].append({
@@ -249,7 +250,7 @@ Hospital Course: {hospital_course}"""
             state["clinician_review_flags"].append(f"Medication Reconciliation: {d.get('medication_name')} ({d.get('type_of_change')}) has no documented reason.")
 
     except Exception as e:
-        print(f"[Reconciler] Reconciliation failed: {e}")
+        logger.error(f"[Reconciler] Reconciliation failed: {e}")
         state["safety_warnings"].append({
             "type": "SYSTEM_RECONCILE_ERROR",
             "message": f"Medication reconciliation failed due to: {e}"
@@ -263,7 +264,7 @@ def safety_verifier_node(state: AgentState) -> AgentState:
     """
     Safety Verifier Node: Performs rigorous safety checks (no-fabrication, conflicts, drug interactions).
     """
-    print("[Verifier] Running Safety Verification checks...")
+    logger.info("[Verifier] Running Safety Verification checks...")
     
     extracted = state["extracted_data"]
     meds_changes = state["medication_changes"]
@@ -347,10 +348,10 @@ Medication Changes:
                 if reason not in state["clinician_review_flags"]:
                     state["clinician_review_flags"].append(f"Safety Escalation: {reason}")
 
-        print(f"[Verifier] Safety verification completed. Total Warnings: {len(state['safety_warnings'])}")
+        logger.info(f"[Verifier] Safety verification completed. Total Warnings: {len(state['safety_warnings'])}")
 
     except Exception as e:
-        print(f"[Verifier] Safety verifier failed: {e}")
+        logger.error(f"[Verifier] Safety verifier failed: {e}")
         state["safety_warnings"].append({
             "type": "SYSTEM_VERIFY_ERROR",
             "message": f"Safety verification failed due to: {e}"
@@ -364,7 +365,7 @@ def synthesizer_node(state: AgentState) -> AgentState:
     """
     Synthesizer Node: Compiles final discharge summary report and structured JSON representation.
     """
-    print("[Synthesizer] Synthesizing final Discharge Summary draft...")
+    logger.info("[Synthesizer] Synthesizing final Discharge Summary draft...")
     
     extracted = state["extracted_data"]
     meds_changes = state["medication_changes"]
@@ -392,7 +393,7 @@ Clinician Review Flags:
             response_json=False
         )
         state["output_markdown"] = markdown_draft
-        print("[Synthesizer] Generated Markdown draft.")
+        logger.info("[Synthesizer] Generated Markdown draft.")
 
         # 2. Synthesize JSON Draft (structured object)
         json_user_prompt = f"Markdown Draft:\n{markdown_draft}\n\nClinical Facts:\n{user_prompt}"
@@ -406,10 +407,10 @@ Clinician Review Flags:
         
         state["output_json"] = json_draft
         state["is_finished"] = True
-        print("[Synthesizer] Synthesized Markdown & JSON drafts successfully.")
+        logger.info("[Synthesizer] Synthesized Markdown & JSON drafts successfully.")
 
     except Exception as e:
-        print(f"[Synthesizer] Synthesis failed: {e}")
+        logger.error(f"[Synthesizer] Synthesis failed: {e}")
         state["output_markdown"] = f"# ERROR GENERATING DISCHARGE SUMMARY DRAFT\n\nFailed due to an unexpected error during compilation: {e}"
         state["output_json"] = {"status": "ERROR", "error_message": str(e)}
         state["is_finished"] = True
