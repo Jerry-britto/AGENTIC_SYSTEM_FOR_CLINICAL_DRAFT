@@ -13,8 +13,9 @@ wheels/
 .env
 .env.local
 
-# Outputs and Logs
-logs
-data
-cache
-
+# Outputs and Logs 
+logs/
+data/
+cache/
+outputs/*
+!outputs/example-discharged_summary.md

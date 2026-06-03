@@ -1,5 +1,4 @@
 import json
-import re
 from groq import Groq
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from clinical_agent.config import GROQ_API_KEY, REASONING_MODEL, UTILITY_MODEL
@@ -10,7 +9,8 @@ from clinical_agent.prompts import (
     READER_SYSTEM_PROMPT,
     RECONCILER_SYSTEM_PROMPT,
     VERIFIER_SYSTEM_PROMPT,
-    SYNTHESIZER_SYSTEM_PROMPT
+    SYNTHESIZER_MARKDOWN_PROMPT,
+    SYNTHESIZER_JSON_PROMPT
 )
 
 # Initialize Groq client
@@ -122,11 +122,21 @@ def reader_node(state: AgentState) -> AgentState:
     # If the planner specified certain pages, we read those. Otherwise, we read everything.
     pages_to_read = action_params.get("pages", [])
     
+    # Ensure pages_to_read is a list of integers
+    use_specified_pages = False
+    parsed_pages_list = []
+    if isinstance(pages_to_read, list) and len(pages_to_read) > 0:
+        try:
+            parsed_pages_list = [int(p) for p in pages_to_read]
+            use_specified_pages = True
+        except (ValueError, TypeError):
+            use_specified_pages = False
+
     doc_context = ""
-    if pages_to_read:
-        print(f"[Reader] Reading specified pages: {pages_to_read}")
+    if use_specified_pages:
+        print(f"[Reader] Reading specified pages: {parsed_pages_list}")
         for page in state["parsed_pages"]:
-            if page["page_number"] in pages_to_read:
+            if page["page_number"] in parsed_pages_list:
                 doc_context += f"\n--- Page {page['page_number']} ---\n{page['markdown']}\n"
     else:
         print(f"[Reader] Dynamically indexing records for topic: '{search_topic}'...")
@@ -175,7 +185,7 @@ def reader_node(state: AgentState) -> AgentState:
         response_text = call_groq_llm(
             system_prompt=READER_SYSTEM_PROMPT.format(search_topic=search_topic),
             user_prompt=user_prompt,
-            model=REASONING_MODEL, # Reasoning model is safer for clinical data extraction
+            model=UTILITY_MODEL,
             response_json=True
         )
         extracted_facts = parse_json_safely(response_text)
@@ -374,16 +384,27 @@ Clinician Review Flags:
 {json.dumps(review_flags, indent=2)}"""
 
     try:
-        response_text = call_groq_llm(
-            system_prompt=SYNTHESIZER_SYSTEM_PROMPT,
+        # 1. Synthesize Markdown Draft (raw text)
+        markdown_draft = call_groq_llm(
+            system_prompt=SYNTHESIZER_MARKDOWN_PROMPT,
             user_prompt=user_prompt,
+            model=REASONING_MODEL,
+            response_json=False
+        )
+        state["output_markdown"] = markdown_draft
+        print("[Synthesizer] Generated Markdown draft.")
+
+        # 2. Synthesize JSON Draft (structured object)
+        json_user_prompt = f"Markdown Draft:\n{markdown_draft}\n\nClinical Facts:\n{user_prompt}"
+        json_response = call_groq_llm(
+            system_prompt=SYNTHESIZER_JSON_PROMPT,
+            user_prompt=json_user_prompt,
             model=REASONING_MODEL,
             response_json=True
         )
-        synth_data = parse_json_safely(response_text)
+        json_draft = parse_json_safely(json_response)
         
-        state["output_markdown"] = synth_data.get("markdown_draft", "")
-        state["output_json"] = synth_data.get("json_draft", {})
+        state["output_json"] = json_draft
         state["is_finished"] = True
         print("[Synthesizer] Synthesized Markdown & JSON drafts successfully.")
 
