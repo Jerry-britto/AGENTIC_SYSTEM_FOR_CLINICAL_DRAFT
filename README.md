@@ -11,6 +11,7 @@ An advanced clinician assistant powered by **LangGraph** and **Groq (Llama 3.3 7
 - [Installation & Setup](#-installation--setup)
 - [How to Run](#-how-to-run)
 - [Clinical Safety Guardrails](#-clinical-safety-guardrails)
+- [Clinician Feedback & Preference Learning](#-clinician-feedback--preference-learning)
 - [Unit Testing](#-unit-testing)
 
 ---
@@ -103,19 +104,22 @@ flowchart TD
 Clickable links to the project components:
 
 * 📂 **Root Files**
-  * 📄 **app.py**: Streamlit web application providing a medical-themed graphical user interface, patient record selection/upload, real-time agent decisional trace logs, and draft downloads.
-  * 📄 **main.py**: Application entrypoint. Coordinates document parsing, initial state configuration, LangGraph loop execution, and output file persistence.
-  * 📄 **pyproject.toml**: Project metadata and library dependencies configuration.
+  * 📄 [app.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/app.py): Streamlit web application providing a medical-themed graphical user interface, patient record selection/upload, real-time agent decisional trace logs, and draft downloads.
+  * 📄 [main.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/main.py): Application entrypoint. Coordinates document parsing, initial state configuration, LangGraph loop execution, and output file persistence.
+  * 📄 [pyproject.toml](file:///home/jerrybritto/demo/AI/clinical_draft_agent/pyproject.toml): Project metadata and library dependencies configuration.
 * 📂 **`clinical_agent` Module**
-  * 📄 **config.py**: API key validator and model assignments (Groq's `llama-3.3-70b-versatile` for reasoning tasks and `llama-3.1-8b-instant` for utility/reading tasks).
-  * 📄 **graph.py**: Compiles the `StateGraph` using [AgentState](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/state.py) and configures the conditional routing.
-  * 📄 **nodes.py**: Core node functions executing LLM tasks and updating the agent state.
-  * 📄 **state.py**: Standardizes the `AgentState` type dictionary.
-  * 📄 **tools.py**: Local drug-drug interaction matching logic and critical interaction reference database.
-  * 📄 **prompts.py**: System and user instructions for the Planner, Reader, Reconciler, Safety Verifier, and Synthesizer roles.
-  * 📄 **parser.py**: Integrates `LlamaCloud` visual parsing API with local caching.
+  * 📄 [config.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/config.py): API key validator and model assignments (Groq's `llama-3.3-70b-versatile` for reasoning tasks and `llama-3.1-8b-instant` for utility/reading tasks).
+  * 📄 [graph.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/graph.py): Compiles the `StateGraph` using [AgentState](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/state.py) and configures the conditional routing.
+  * 📄 [nodes.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py): Core node functions executing LLM tasks and updating the agent state.
+  * 📄 [state.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/state.py): Standardizes the `AgentState` type dictionary.
+  * 📄 [tools.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/tools.py): Local drug-drug interaction matching logic and critical interaction reference database.
+  * 📄 [prompts.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/prompts.py): System and user instructions for the Planner, Reader, Reconciler, Safety Verifier, and Synthesizer roles.
+  * 📄 [parser.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/parser.py): Integrates `LlamaCloud` visual parsing API with local caching.
+  * 📄 [learning.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/learning.py): In-context clinician preference learner, simulated clinician editor, preference rule extractor, and correction memory manager.
+* 📂 **Evaluation & Scripts**
+  * 📄 [run_learning_eval.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/scripts/run_learning_eval.py): Script to run a complete clinician feedback loop simulation, comparing generated drafts to corrected versions to optimize compliance.
 * 📂 **Tests**
-  * 📄 **test_clinical_agent.py**: Comprehensive unit tests covering DDI lookups, JSON parsing, router endpoints, and parser caching.
+  * 📄 [test_clinical_agent.py](file:///home/jerrybritto/demo/AI/clinical_draft_agent/tests/test_clinical_agent.py): Comprehensive unit tests covering DDI lookups, JSON parsing, router endpoints, and parser caching.
 
 ---
 
@@ -182,6 +186,29 @@ Safety features configured in [verifier_node](file:///home/jerrybritto/demo/AI/c
 | **Fabrication Prevention** | Strict prompt engineering and State constraints | Forces the system to render `[MISSING - Flagged for Clinician Review]` rather than hallucinating patient demographics or clinical metrics. |
 | **Document Conflicts** | Cross-referencing page logs | Detects and flags clinical disagreements in source files (e.g., contrasting laboratory values). |
 | **Specific Clinical Contraindications** | Clinical reasoning verification in [VERIFIER_SYSTEM_PROMPT](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/prompts.py#L62-L81) | Prevents inappropriate therapeutic additions (e.g., prescribing antimotility drug Loperamide during active infectious gastroenteritis). |
+
+---
+
+## 🛡️ Clinician Feedback & Preference Learning
+
+In production clinical workflows, clinicians review and edit AI draft summaries before finalization. Aegis implements an **In-Context Preference Learning** loop to automatically capture style preferences and terminology corrections from these edits, optimizing future drafts without requiring expensive model fine-tuning.
+
+### How it Works
+1. **Simulated Clinical Reviewer**: An editor LLM (representing a senior clinician) applies a strict hidden editing policy:
+   - **Generic Substitution**: Replaces brand name drugs with their generic equivalents (e.g., "Lasix" $\rightarrow$ "furosemide").
+   - **Lab Results Qualification**: Appends status qualifiers in parentheses next to numbers (e.g., "Sodium: 131 mEq/L (Low)").
+   - **Follow-Up Structuring**: Formats follow-up lists strictly using three specific subheadings: `**Medications**`, `**Appointments**`, and `**Dietary & Activity Restrictions**`.
+2. **Preference Learner**: Compares the original draft with the clinician's corrected version to extract and generalize feedback guidelines, saving them to [cache/correction_memory.json](file:///home/jerrybritto/demo/AI/clinical_draft_agent/cache/correction_memory.json).
+3. **Dynamic In-Context Injection**: When subsequent drafts are synthesized in the [Synthesizer Node](file:///home/jerrybritto/demo/AI/clinical_draft_agent/clinical_agent/nodes.py#L353-L396), the learned rules are dynamically injected as `CRITICAL ADAPTATION DIRECTIVES` in the system prompt.
+4. **Safety Safeguards**: To prevent style optimization from compromising clinical detail (the "gaming" problem), facts extraction is separated from style tuning, and safety constraints checked by the Verifier node strictly override stylistic preference rules.
+
+### Running the Learning Simulation
+You can trigger and visualize this feedback sequence either in the Streamlit Dashboard (by navigating to **Doctor Feedback & Learning**) or via the command line:
+
+```bash
+uv run python scripts/run_learning_eval.py
+```
+Upon completion, the engine compares baseline and final compliance rates on held-out test cases, saving the report to `logs/evaluation_results.json`.
 
 ---
 

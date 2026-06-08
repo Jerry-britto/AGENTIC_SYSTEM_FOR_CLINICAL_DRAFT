@@ -25,21 +25,46 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 )
 def call_groq_llm(system_prompt: str, user_prompt: str, model: str, response_json: bool = False) -> str:
     """
-    Calls the Groq LLM with retries on failure.
+    Calls the Groq LLM with retries on failure. Automatically falls back to a utility/smaller model if 429 occurs.
     """
-    kwargs = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 0.1
-    }
-    if response_json:
-        kwargs["response_format"] = {"type": "json_object"}
-        
-    completion = groq_client.chat.completions.create(**kwargs)
-    return completion.choices[0].message.content
+    selected_model = model
+    try:
+        kwargs = {
+            "model": selected_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.1
+        }
+        if response_json:
+            kwargs["response_format"] = {"type": "json_object"}
+            
+        completion = groq_client.chat.completions.create(**kwargs)
+        return completion.choices[0].message.content
+    except Exception as e:
+        err_msg = str(e).lower()
+        if "429" in err_msg or "rate limit" in err_msg or "limit exceeded" in err_msg:
+            fallback_model = UTILITY_MODEL
+            if selected_model == UTILITY_MODEL:
+                fallback_model = "gemma2-9b-it"
+            
+            logger.warning(f"[Rate Limit] Model {selected_model} hit rate limit. Retrying with fallback: {fallback_model}...")
+            kwargs = {
+                "model": fallback_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.1
+            }
+            if response_json:
+                kwargs["response_format"] = {"type": "json_object"}
+                
+            completion = groq_client.chat.completions.create(**kwargs)
+            return completion.choices[0].message.content
+        else:
+            raise e
 
 def parse_json_safely(text: str) -> dict:
     """
@@ -386,8 +411,19 @@ Clinician Review Flags:
 
     try:
         # 1. Synthesize Markdown Draft (raw text)
+        from clinical_agent.learning import load_correction_memory
+        learned_rules = load_correction_memory()
+        
+        system_prompt = SYNTHESIZER_MARKDOWN_PROMPT
+        if learned_rules:
+            logger.info(f"[Synthesizer] Injecting {len(learned_rules)} clinician preference rules from correction memory...")
+            preferences_text = "\n".join(f"- {rule}" for rule in learned_rules)
+            system_prompt += f"\n\n### CRITICAL ADAPTATION DIRECTIVES - CLINICIAN PREFERENCES:\n" \
+                             f"You MUST modify your output formatting, style, and terminology to comply strictly with these preferences:\n" \
+                             f"{preferences_text}\n"
+
         markdown_draft = call_groq_llm(
-            system_prompt=SYNTHESIZER_MARKDOWN_PROMPT,
+            system_prompt=system_prompt,
             user_prompt=user_prompt,
             model=REASONING_MODEL,
             response_json=False
