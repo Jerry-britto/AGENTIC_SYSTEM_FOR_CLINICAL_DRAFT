@@ -25,6 +25,15 @@ class AgentState(TypedDict):
     # Iteration counter (cap at 8)
     iteration_count: int
     
+    # Track completed phases to prevent infinite loops (e.g. ["read", "reconcile", "verify"])
+    completed_phases: List[str]
+    
+    # Track page numbers retrieved by reader to avoid reading duplicate information
+    retrieved_pages: List[int]
+    
+    # Documented hallucination checks (cross-referencing results)
+    hallucination_report: Dict[str, Any]
+    
     # Generated reports
     output_markdown: str
     output_json: Dict[str, Any]

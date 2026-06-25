@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from clinical_agent.synthetic_data import get_synthetic_patient_data, generate_and_cache_synthetic_patients
+from clinical_agent.parser import LlamaCloudParser
 from clinical_agent.graph import compile_clinical_agent_graph
 from clinical_agent.learning import (
     calculate_normalized_similarity,
@@ -24,7 +25,7 @@ def check_policy_compliance(draft: str, patient_id: int) -> dict:
     """
     draft_lower = draft.lower()
     
-    # Fetch patient details
+    # Patient clinical profiles database
     patient_data = {
         1: {"meds": ["klavox", "lasix", "nexium"], "labs_count": 3},
         2: {"meds": ["lipitor", "lasix", "ventolin"], "labs_count": 4},
@@ -81,6 +82,12 @@ def run_evaluation_flow():
     # 1. Initialize dataset
     generate_and_cache_synthetic_patients()
     
+    # Parse real document pages
+    logger.info("[Parser] Parsing real document pages for comparison...")
+    parser = LlamaCloudParser()
+    real_doc_data = parser.parse_pdf("data/patient_records.pdf")
+    real_pages = real_doc_data.get("pages", [])
+    
     # 2. Reset Correction Memory
     clear_correction_memory()
     
@@ -107,6 +114,9 @@ def run_evaluation_flow():
             "current_plan": "Initialize extraction plan.",
             "trace_steps": ["State initialized. Commencing clinical extraction plan."],
             "iteration_count": 0,
+            "completed_phases": [],
+            "retrieved_pages": [],
+            "hallucination_report": {},
             "output_markdown": "",
             "output_json": {},
             "is_finished": False
@@ -129,6 +139,32 @@ def run_evaluation_flow():
         })
         logger.info(f"Baseline - Patient {pid}: Similarity = {similarity:.4f}, Compliance = {compliance['overall_compliance']:.4f}")
         
+    # Baseline on Real Document (using Patient 1 profile for grading)
+    logger.info("[Eval] Running BASELINE evaluation on real document (patient_records.pdf)...")
+    real_initial_state = {
+        "parsed_pages": real_pages,
+        "extracted_data": {},
+        "medication_changes": [],
+        "safety_warnings": [],
+        "clinician_review_flags": [],
+        "current_plan": "Initialize extraction plan.",
+        "trace_steps": ["State initialized. Commencing clinical extraction plan."],
+        "iteration_count": 0,
+        "completed_phases": [],
+        "retrieved_pages": [],
+        "hallucination_report": {},
+        "output_markdown": "",
+        "output_json": {},
+        "is_finished": False
+    }
+    real_baseline_state = workflow.invoke(real_initial_state)
+    real_draft_base = real_baseline_state.get("output_markdown", "")
+    real_edited_base = reviewer.review_draft(real_draft_base)
+    real_sim_base = calculate_normalized_similarity(real_draft_base, real_edited_base)
+    real_comp_base = check_policy_compliance(real_draft_base, 1) # David Miller corresponds to patient_id 1
+    
+    logger.info(f"Baseline - Real Document: Similarity = {real_sim_base:.4f}, Compliance = {real_comp_base['overall_compliance']:.4f}")
+
     # 4. Sequential Learning Loop on Training Set
     logger.info("[Eval] Starting SEQUENTIAL learning loop across training cases (Patients 1 to 4)...")
     training_steps = []
@@ -147,6 +183,9 @@ def run_evaluation_flow():
             "current_plan": "Initialize extraction plan.",
             "trace_steps": ["State initialized. Commencing clinical extraction plan."],
             "iteration_count": 0,
+            "completed_phases": [],
+            "retrieved_pages": [],
+            "hallucination_report": {},
             "output_markdown": "",
             "output_json": {},
             "is_finished": False
@@ -194,6 +233,9 @@ def run_evaluation_flow():
             "current_plan": "Initialize extraction plan.",
             "trace_steps": ["State initialized. Commencing clinical extraction plan."],
             "iteration_count": 0,
+            "completed_phases": [],
+            "retrieved_pages": [],
+            "hallucination_report": {},
             "output_markdown": "",
             "output_json": {},
             "is_finished": False
@@ -216,12 +258,48 @@ def run_evaluation_flow():
         })
         logger.info(f"Final - Patient {pid}: Similarity = {similarity:.4f}, Compliance = {compliance['overall_compliance']:.4f}")
         
+    # Final Evaluation on Real Document
+    logger.info("\n[Eval] Running FINAL evaluation on real document (patient_records.pdf) with accumulated preferences...")
+    real_final_state = {
+        "parsed_pages": real_pages,
+        "extracted_data": {},
+        "medication_changes": [],
+        "safety_warnings": [],
+        "clinician_review_flags": [],
+        "current_plan": "Initialize extraction plan.",
+        "trace_steps": ["State initialized. Commencing clinical extraction plan."],
+        "iteration_count": 0,
+        "completed_phases": [],
+        "retrieved_pages": [],
+        "hallucination_report": {},
+        "output_markdown": "",
+        "output_json": {},
+        "is_finished": False
+    }
+    real_final_res = workflow.invoke(real_final_state)
+    real_draft_final = real_final_res.get("output_markdown", "")
+    real_edited_final = reviewer.review_draft(real_draft_final)
+    real_sim_final = calculate_normalized_similarity(real_draft_final, real_edited_final)
+    real_comp_final = check_policy_compliance(real_draft_final, 1)
+    
+    logger.info(f"Final - Real Document: Similarity = {real_sim_final:.4f}, Compliance = {real_comp_final['overall_compliance']:.4f}")
+
     # Write evaluation logs
     eval_output = {
         "baseline_test": baseline_results,
         "training_steps": training_steps,
         "final_test": final_results,
-        "learned_rules": load_correction_memory()
+        "learned_rules": load_correction_memory(),
+        "real_document_comparison": {
+            "baseline": {
+                "similarity": real_sim_base,
+                "compliance": real_comp_base
+            },
+            "final": {
+                "similarity": real_sim_final,
+                "compliance": real_comp_final
+            }
+        }
     }
     
     os.makedirs("logs", exist_ok=True)
@@ -239,6 +317,12 @@ def run_evaluation_flow():
                     f"(Improvement: {f['similarity'] - b['similarity']:+.4f})")
         logger.info(f"  Compliance: {b['compliance']['overall_compliance']:.4f} -> {f['compliance']['overall_compliance']:.4f} "
                     f"(Improvement: {f['compliance']['overall_compliance'] - b['compliance']['overall_compliance']:+.4f})")
+    
+    logger.info("\nReal Document Comparison:")
+    logger.info(f"  Similarity: {real_sim_base:.4f} -> {real_sim_final:.4f} "
+                f"(Improvement: {real_sim_final - real_sim_base:+.4f})")
+    logger.info(f"  Compliance: {real_comp_base['overall_compliance']:.4f} -> {real_comp_final['overall_compliance']:.4f} "
+                f"(Improvement: {real_comp_final['overall_compliance'] - real_comp_base['overall_compliance']:+.4f})")
     logger.info("=" * 50)
     
 if __name__ == "__main__":

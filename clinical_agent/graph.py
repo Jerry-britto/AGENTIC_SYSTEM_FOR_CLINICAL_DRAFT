@@ -12,10 +12,14 @@ def route_based_on_action(state: AgentState) -> str:
     """
     Router function to determine the next node based on the Planner's decision.
     """
-    if state["is_finished"] or state["iteration_count"] > 8:
+    from clinical_agent.logging_utils import logger
+    
+    if state.get("is_finished") or state.get("iteration_count", 0) > 8:
+        logger.info("[Graph Router] Synthesizing final draft (is_finished=True or iteration cap reached)")
         return "synthesizer"
         
-    next_action = state["extracted_data"].get("_next_action", "READ_DOCUMENTS")
+    next_action = state.get("extracted_data", {}).get("_next_action", "READ_DOCUMENTS")
+    logger.info(f"[Graph Router] Evaluating planner action '{next_action}' (Iteration {state.get('iteration_count')}/8)...")
     
     if next_action == "READ_DOCUMENTS":
         return "reader"
@@ -26,6 +30,7 @@ def route_based_on_action(state: AgentState) -> str:
     elif next_action == "SYNTHESIZE_DRAFT":
         return "synthesizer"
         
+    logger.warning(f"[Graph Router] Unrecognized action '{next_action}'. Routing to default 'reader' node.")
     return "reader"
 
 def compile_clinical_agent_graph():
